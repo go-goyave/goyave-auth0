@@ -6,3 +6,5 @@
 [![Go Reference](https://pkg.go.dev/badge/goyave.dev/goyave-auth0.svg)](https://pkg.go.dev/goyave.dev/goyave-auth0)
 
 **🚧 Work in progress**
+
+TODO documentation

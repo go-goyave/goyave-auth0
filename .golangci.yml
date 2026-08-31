@@ -48,7 +48,7 @@ linters:
       checks: ["all", "-QF1001"]
     godoclint:
       enable:
-        #- require-doc
+        - require-doc
         - deprecated
       options:
         require-doc:
