@@ -2,6 +2,7 @@ package auth0
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/auth0/go-jwt-middleware/v3/validator"
@@ -69,7 +70,7 @@ func (m *ScopeMiddleware[C]) Handle(next goyave.Handler) goyave.Handler {
 
 		claims, ok := request.Extra[ExtraAuth0Claims{}].(*Claims[C])
 		if !ok {
-			next(response, request)
+			response.Error(errors.New("ScopeMiddleware: missing Auth0 claims in the request extra or incorrect type"))
 			return
 		}
 

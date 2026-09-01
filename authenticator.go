@@ -36,6 +36,7 @@ type Authenticator[U any, C validator.CustomClaims] struct {
 
 // NewAuthenticator setup a JWKS caching provider, a JWT validator and a Goyave authenticator.
 // If your JWT isn't expected to hold custom claims, use [NoCustomClaims] for type C.
+// Type C must be a pointer.
 func NewAuthenticator[U any, C validator.CustomClaims](userService UserService[U], cfg *Config, validatorOptions ...validator.Option) (*Authenticator[U, C], error) {
 	issuerURLs, err := generateIssuerURLs(cfg.IssuerDomains)
 	if err != nil {
@@ -62,7 +63,7 @@ func NewAuthenticator[U any, C validator.CustomClaims](userService UserService[U
 		validator.WithIssuers(issuerURLs),
 		validator.WithAudiences(cfg.Audiences),
 		validator.WithAllowedClockSkew(30 * time.Second),
-		validator.WithCustomClaims(func() C {
+		validator.WithCustomClaims(func() C { // TODO test this, likely error because of nil pointer
 			var customClaims C
 			return customClaims
 		}),
