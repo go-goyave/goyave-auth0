@@ -10,44 +10,39 @@ import (
 	"github.com/auth0/go-jwt-middleware/v3/validator"
 	"gorm.io/gorm"
 	"goyave.dev/goyave/v5"
-	"goyave.dev/goyave/v5/auth"
 	"goyave.dev/goyave/v5/util/errors"
 )
 
-type UserService[T any, C validator.CustomClaims] interface {
-	// TODO User service depending on JWT claims isn't ideal. It should receive the subject.
-	// If developer doesn't want to use Subject, or use a custom claim provide an option on the
-	// Authenticator to select the claim to use as subject (func).
-	FindUserByClaims(ctx context.Context, claims *Claims[C]) (*T, error)
+// UserService is the dependency of [Authenticator] used to retrieve a user
+// using a JWT subject claim. See [Authenticator.SubjectFunc].
+type UserService[T any] interface {
+	FindUserBySubject(ctx context.Context, subject string) (*T, error)
 }
 
+// Authenticator Auth0 [goyave.dev/goyave/v5/auth.Authenticator] implementation.
 type Authenticator[U any, C validator.CustomClaims] struct {
 	goyave.Component
 
-	UserService UserService[U, C]
+	UserService UserService[U]
 
 	Config    *Config
 	validator *validator.Validator
+
+	// SubjectFunc returns the value of the subject to use for user
+	// retrieval. The returned value is forwarded to the [UserService].
+	// By default, it returns the [validator.RegisteredClaims.Subject] (`sub` JWT claim).
+	SubjectFunc func(c *Claims[C]) string
 }
 
-type Config struct {
-	Domain   string
-	Audience string
-
-	Algorithm validator.SignatureAlgorithm // TODO type incompatible with v6 Config by default (need to create a validator for this). Not a problem for v5.
-
-	CacheTTL int
-}
-
-// TODO register config entries for v5
-
-func NewAuthenticator[U any, C validator.CustomClaims](userService UserService[U, C], cfg *Config, validatorOptions ...validator.Option) (*Authenticator[U, C], error) { // TODO try it on blog-example
-	issuerURL, err := url.Parse("https://" + cfg.Domain + "/")
+// NewAuthenticator setup a JWKS caching provider, a JWT validator and a Goyave authenticator.
+// If your JWT isn't expected to hold custom claims, use [NoCustomClaims] for type C.
+func NewAuthenticator[U any, C validator.CustomClaims](userService UserService[U], cfg *Config, validatorOptions ...validator.Option) (*Authenticator[U, C], error) {
+	issuerURL, err := url.Parse("https://" + cfg.IssuerDomain + "/")
 	if err != nil {
 		return nil, errors.Errorf("failed to parse issuer URL: %w", err)
 	}
 
-	cacheTTL := 5 * time.Minute
+	cacheTTL := 15 * time.Minute
 	if cfg.CacheTTL != 0 {
 		cacheTTL = time.Duration(cfg.CacheTTL) * time.Second
 	}
@@ -63,18 +58,14 @@ func NewAuthenticator[U any, C validator.CustomClaims](userService UserService[U
 	opts := append([]validator.Option{
 		validator.WithKeyFunc(provider.KeyFunc),
 		validator.WithAlgorithm(cfg.Algorithm),
-		validator.WithIssuer(issuerURL.String()),
-		validator.WithAudience(cfg.Audience),
-		// TODO make it possible to skip this option
-		// maybe with CustomClaimsAuthenticator and Authenticator so no problem with generics?
-		// Or create a type "NoClaims" that just discards custom claims?
-		validator.WithCustomClaims(func() validator.CustomClaims {
+		validator.WithIssuer(issuerURL.String()), // TODO support multi issuers (currently blocked because caching provider only supports one provider)
+		validator.WithAudiences(cfg.Audiences),
+		validator.WithAllowedClockSkew(30 * time.Second),
+		validator.WithCustomClaims(func() C {
 			var customClaims C
 			return customClaims
 		}),
-		validator.WithAllowedClockSkew(30 * time.Second),
 	}, validatorOptions...)
-
 	jwtValidator, err := validator.New(opts...)
 	if err != nil {
 		return nil, errors.Errorf("failed to create validator: %w", err)
@@ -87,6 +78,7 @@ func NewAuthenticator[U any, C validator.CustomClaims](userService UserService[U
 	}, nil
 }
 
+// Authenticate implementation of [goyave.dev/goyave/v5/auth.Authenticator.Authenticate].
 func (a *Authenticator[U, C]) Authenticate(request *goyave.Request) (*U, error) {
 	token, ok := request.BearerToken()
 	// Note: DPoP is not supported
@@ -102,12 +94,12 @@ func (a *Authenticator[U, C]) Authenticate(request *goyave.Request) (*U, error) 
 
 	validatedClaims, ok := rawClaims.(*validator.ValidatedClaims)
 	if !ok {
-		return nil, stderrors.New(request.Lang.Get("auth.invalid-claims")) // TODO lang entry invalid claims
+		return nil, stderrors.New(request.Lang.Get("auth.invalid-credentials"))
 	}
 
 	customClaims, ok := validatedClaims.CustomClaims.(C)
 	if !ok {
-		return nil, stderrors.New(request.Lang.Get("auth.invalid-claims")) // TODO lang entry invalid claims
+		return nil, stderrors.New(request.Lang.Get("auth.invalid-credentials"))
 	}
 
 	claims := &Claims[C]{
@@ -115,9 +107,9 @@ func (a *Authenticator[U, C]) Authenticate(request *goyave.Request) (*U, error) 
 		CustomClaims:     customClaims,
 	}
 
-	request.Extra[auth.ExtraJWTClaims{}] = claims // Claims can be used later for permissions/scopes
+	request.Extra[ExtraAuth0Claims{}] = claims // Claims can be used later for permissions/scopes
 
-	user, err := a.UserService.FindUserByClaims(request.Context(), claims)
+	user, err := a.UserService.FindUserBySubject(request.Context(), a.getSubject(claims))
 	if err != nil {
 		if stderrors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, stderrors.New(request.Lang.Get("auth.invalid-credentials"))
@@ -126,4 +118,11 @@ func (a *Authenticator[U, C]) Authenticate(request *goyave.Request) (*U, error) 
 	}
 
 	return user, nil
+}
+
+func (a *Authenticator[U, C]) getSubject(claims *Claims[C]) string {
+	if a.SubjectFunc == nil {
+		return claims.RegisteredClaims.Subject
+	}
+	return a.SubjectFunc(claims)
 }
