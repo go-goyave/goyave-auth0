@@ -13,13 +13,13 @@ import (
 type Config struct {
 	Algorithm validator.SignatureAlgorithm // TODO type incompatible with v6 Config by default (need to create a validator for this). Not a problem for v5.
 
-	// IssuerDomain of the issuer used to generate the issuer URL. (e.g.: "dev-abcdefg.eu.auth0.com")
+	// IssuerDomains of the accepted issuers, used to generate the issuer URL. (e.g.: "dev-abcdefg.eu.auth0.com")
 	//
-	// The issuer URL should match the `iss` claim in the JWT. Tokens with a
-	// different issuer will be rejected.
+	// The token must contain one of the specified issuers. Tokens without
+	// any matching issuer will be rejected.
 	//
-	// See [validator.WithIssuer] for more details.
-	IssuerDomain string
+	// See [validator.WithIssuers] for more details.
+	IssuerDomains []string
 
 	// Audiences expected audience claims (`aud`) for token validation.
 	//
@@ -51,16 +51,16 @@ func (Config) RuleSet() v.RuleSet {
 // Currently not used. Implemented for Goyave v6 forward compatibility.
 func (Config) Default() Config {
 	return Config{
-		IssuerDomain: "",
-		Audiences:    []string{},
-		Algorithm:    validator.HS256,
-		CacheTTL:     15 * 60,
+		IssuerDomains: []string{},
+		Audiences:     []string{},
+		Algorithm:     validator.RS256,
+		CacheTTL:      15 * 60,
 	}
 }
 
 func init() {
 	// Goyave v5 config
-	config.Register("auth.auth0.issuerDomain", config.Entry{Value: "", Type: reflect.String})
+	config.Register("auth.auth0.issuerDomains", config.Entry{Value: []string{}, Type: reflect.String, IsSlice: true})
 	config.Register("auth.auth0.audiences", config.Entry{Value: []string{}, Type: reflect.String, IsSlice: true})
 	config.Register("auth.auth0.algorithm", config.Entry{Value: "", Type: reflect.String})
 	config.Register("auth.auth0.cacheTTL", config.Entry{Value: 15 * 60, Type: reflect.Int})

@@ -37,9 +37,9 @@ type Authenticator[U any, C validator.CustomClaims] struct {
 // NewAuthenticator setup a JWKS caching provider, a JWT validator and a Goyave authenticator.
 // If your JWT isn't expected to hold custom claims, use [NoCustomClaims] for type C.
 func NewAuthenticator[U any, C validator.CustomClaims](userService UserService[U], cfg *Config, validatorOptions ...validator.Option) (*Authenticator[U, C], error) {
-	issuerURL, err := url.Parse("https://" + cfg.IssuerDomain + "/")
+	issuerURLs, err := generateIssuerURLs(cfg.IssuerDomains)
 	if err != nil {
-		return nil, errors.Errorf("failed to parse issuer URL: %w", err)
+		return nil, errors.New(err)
 	}
 
 	cacheTTL := 15 * time.Minute
@@ -47,10 +47,11 @@ func NewAuthenticator[U any, C validator.CustomClaims](userService UserService[U
 		cacheTTL = time.Duration(cfg.CacheTTL) * time.Second
 	}
 
-	provider, err := jwks.NewCachingProvider(
-		jwks.WithIssuerURL(issuerURL),
-		jwks.WithCacheTTL(cacheTTL),
+	provider, err := jwks.NewMultiIssuerProvider(
+		jwks.WithMultiIssuerCacheTTL(cacheTTL),
+		// TODO expose custom options for the provider
 	)
+
 	if err != nil {
 		return nil, errors.Errorf("failed to create JWKS provider: %w", err)
 	}
@@ -58,7 +59,7 @@ func NewAuthenticator[U any, C validator.CustomClaims](userService UserService[U
 	opts := append([]validator.Option{
 		validator.WithKeyFunc(provider.KeyFunc),
 		validator.WithAlgorithm(cfg.Algorithm),
-		validator.WithIssuer(issuerURL.String()), // TODO support multi issuers (currently blocked because caching provider only supports one provider)
+		validator.WithIssuers(issuerURLs),
 		validator.WithAudiences(cfg.Audiences),
 		validator.WithAllowedClockSkew(30 * time.Second),
 		validator.WithCustomClaims(func() C {
@@ -76,6 +77,18 @@ func NewAuthenticator[U any, C validator.CustomClaims](userService UserService[U
 		UserService: userService,
 		validator:   jwtValidator,
 	}, nil
+}
+
+func generateIssuerURLs(domains []string) ([]string, error) {
+	urls := make([]string, 0, len(domains))
+	for _, domain := range domains {
+		url, err := url.Parse("https://" + domain + "/")
+		if err != nil {
+			return nil, errors.Errorf("failed to parse issuer URL: %w", err)
+		}
+		urls = append(urls, url.String())
+	}
+	return urls, nil
 }
 
 // Authenticate implementation of [goyave.dev/goyave/v5/auth.Authenticator.Authenticate].
