@@ -15,6 +15,13 @@ const MetaScope = "goyave.auth0.scope"
 // Set by the [Authenticator].
 type ExtraAuth0Claims struct{}
 
+// CustomClaims is a type constraint allowing reflection-less [validator.CustomClaims] pointer instanciation.
+// Implementation should use a pointer receiver on the Validate method.
+type CustomClaims[T any] interface {
+	*T
+	validator.CustomClaims
+}
+
 // Claims storing registered and custom JWT claims.
 type Claims[T validator.CustomClaims] struct {
 	RegisteredClaims validator.RegisteredClaims
@@ -24,9 +31,9 @@ type Claims[T validator.CustomClaims] struct {
 // NoCustomClaims represents empty custom JWT claims.
 // Use it when your tokens don't contain any custom claim and when
 // registered claims are sufficient.
-type NoCustomClaims map[string]any
+type NoCustomClaims struct{}
 
-func (NoCustomClaims) Validate(_ context.Context) error {
+func (*NoCustomClaims) Validate(_ context.Context) error {
 	return nil
 }
 

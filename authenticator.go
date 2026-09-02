@@ -20,7 +20,7 @@ type UserService[T any] interface {
 }
 
 // Authenticator Auth0 [goyave.dev/goyave/v5/auth.Authenticator] implementation.
-type Authenticator[U any, C validator.CustomClaims] struct {
+type Authenticator[U any, C any, CC CustomClaims[C]] struct {
 	goyave.Component
 
 	UserService UserService[U]
@@ -31,13 +31,13 @@ type Authenticator[U any, C validator.CustomClaims] struct {
 	// SubjectFunc returns the value of the subject to use for user
 	// retrieval. The returned value is forwarded to the [UserService].
 	// By default, it returns the [validator.RegisteredClaims.Subject] (`sub` JWT claim).
-	SubjectFunc func(c *Claims[C]) string
+	SubjectFunc func(c *Claims[CC]) string
 }
 
 // NewAuthenticator setup a JWKS caching provider, a JWT validator and a Goyave authenticator.
 // If your JWT isn't expected to hold custom claims, use [NoCustomClaims] for type C.
-// Type C must be a pointer.
-func NewAuthenticator[U any, C validator.CustomClaims](userService UserService[U], cfg *Config, validatorOptions ...validator.Option) (*Authenticator[U, C], error) {
+// Type C must NOT be a pointer. Type CC can be inferred, no need to explicitly specify it.
+func NewAuthenticator[U any, C any, CC CustomClaims[C]](userService UserService[U], cfg *Config, validatorOptions ...validator.Option) (*Authenticator[U, C, CC], error) {
 	issuerURLs, err := generateIssuerURLs(cfg.IssuerDomains)
 	if err != nil {
 		return nil, errors.New(err)
@@ -63,17 +63,17 @@ func NewAuthenticator[U any, C validator.CustomClaims](userService UserService[U
 		validator.WithIssuers(issuerURLs),
 		validator.WithAudiences(cfg.Audiences),
 		validator.WithAllowedClockSkew(30 * time.Second),
-		validator.WithCustomClaims(func() C { // TODO test this, likely error because of nil pointer
-			var customClaims C
-			return customClaims
+		validator.WithCustomClaims(func() CC {
+			return CC(new(C))
 		}),
+		// validator.WithCustomClaims[*C](newCustomClaims[C, *C]),
 	}, validatorOptions...)
 	jwtValidator, err := validator.New(opts...)
 	if err != nil {
 		return nil, errors.Errorf("failed to create validator: %w", err)
 	}
 
-	return &Authenticator[U, C]{
+	return &Authenticator[U, C, CC]{
 		config:      cfg,
 		UserService: userService,
 		validator:   jwtValidator,
@@ -93,7 +93,7 @@ func generateIssuerURLs(domains []string) ([]string, error) {
 }
 
 // Authenticate implementation of [goyave.dev/goyave/v5/auth.Authenticator.Authenticate].
-func (a *Authenticator[U, C]) Authenticate(request *goyave.Request) (*U, error) {
+func (a *Authenticator[U, C, CC]) Authenticate(request *goyave.Request) (*U, error) {
 	token, ok := request.BearerToken()
 	// Note: DPoP is not supported
 
@@ -111,12 +111,12 @@ func (a *Authenticator[U, C]) Authenticate(request *goyave.Request) (*U, error) 
 		return nil, stderrors.New(request.Lang.Get("auth.invalid-credentials"))
 	}
 
-	customClaims, ok := validatedClaims.CustomClaims.(C)
+	customClaims, ok := validatedClaims.CustomClaims.(CC)
 	if !ok {
 		return nil, stderrors.New(request.Lang.Get("auth.invalid-credentials"))
 	}
 
-	claims := &Claims[C]{
+	claims := &Claims[CC]{
 		RegisteredClaims: validatedClaims.RegisteredClaims,
 		CustomClaims:     customClaims,
 	}
@@ -134,7 +134,7 @@ func (a *Authenticator[U, C]) Authenticate(request *goyave.Request) (*U, error) 
 	return user, nil
 }
 
-func (a *Authenticator[U, C]) getSubject(claims *Claims[C]) string {
+func (a *Authenticator[U, C, CC]) getSubject(claims *Claims[CC]) string {
 	if a.SubjectFunc == nil {
 		return claims.RegisteredClaims.Subject
 	}
