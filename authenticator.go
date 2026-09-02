@@ -16,7 +16,7 @@ import (
 // UserService is the dependency of [Authenticator] used to retrieve a user
 // using a JWT subject claim. See [Authenticator.SubjectFunc].
 type UserService[T any] interface {
-	FindUserBySubject(ctx context.Context, subject string) (*T, error)
+	FindBySubject(ctx context.Context, subject string) (*T, error)
 }
 
 // Authenticator Auth0 [goyave.dev/goyave/v5/auth.Authenticator] implementation.
@@ -25,7 +25,7 @@ type Authenticator[U any, C validator.CustomClaims] struct {
 
 	UserService UserService[U]
 
-	Config    *Config
+	config    *Config
 	validator *validator.Validator
 
 	// SubjectFunc returns the value of the subject to use for user
@@ -74,7 +74,7 @@ func NewAuthenticator[U any, C validator.CustomClaims](userService UserService[U
 	}
 
 	return &Authenticator[U, C]{
-		Config:      cfg,
+		config:      cfg,
 		UserService: userService,
 		validator:   jwtValidator,
 	}, nil
@@ -123,7 +123,7 @@ func (a *Authenticator[U, C]) Authenticate(request *goyave.Request) (*U, error) 
 
 	request.Extra[ExtraAuth0Claims{}] = claims // Claims can be used later for permissions/scopes
 
-	user, err := a.UserService.FindUserBySubject(request.Context(), a.getSubject(claims))
+	user, err := a.UserService.FindBySubject(request.Context(), a.getSubject(claims))
 	if err != nil {
 		if stderrors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, stderrors.New(request.Lang.Get("auth.invalid-credentials"))

@@ -11,7 +11,7 @@ import (
 
 // Config for the Auth0 [Authenticator].
 type Config struct {
-	Algorithm validator.SignatureAlgorithm // TODO type incompatible with v6 Config by default (need to create a validator for this). Not a problem for v5.
+	Algorithm validator.SignatureAlgorithm
 
 	// IssuerDomains of the accepted issuers, used to generate the issuer URL. (e.g.: "dev-abcdefg.eu.auth0.com")
 	//
@@ -62,7 +62,7 @@ func init() {
 	// Goyave v5 config
 	config.Register("auth.auth0.issuerDomains", config.Entry{Value: []string{}, Type: reflect.String, IsSlice: true})
 	config.Register("auth.auth0.audiences", config.Entry{Value: []string{}, Type: reflect.String, IsSlice: true})
-	config.Register("auth.auth0.algorithm", config.Entry{Value: "", Type: reflect.String})
+	config.Register("auth.auth0.algorithm", config.Entry{Value: string(validator.RS256), Type: reflect.String})
 	config.Register("auth.auth0.cacheTTL", config.Entry{Value: 15 * 60, Type: reflect.Int})
 }
 
