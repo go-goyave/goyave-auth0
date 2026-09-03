@@ -3,6 +3,8 @@ package auth0
 import (
 	"reflect"
 
+	"github.com/auth0/go-auth0/v3/management/option"
+	"github.com/auth0/go-jwt-middleware/v3/jwks"
 	"github.com/auth0/go-jwt-middleware/v3/validator"
 	"goyave.dev/goyave/v5/config"
 	"goyave.dev/goyave/v5/lang"
@@ -20,6 +22,10 @@ type Config struct {
 	// ClientSecret your Auth0 application client secret. Used to retrieve user info
 	// from the management API on user registration.
 	ClientSecret string
+
+	ValidatorOptions  []validator.Option               `json:"-" yaml:"-" toml:"-"`
+	JWKSOptions       []jwks.MultiIssuerProviderOption `json:"-" yaml:"-" toml:"-"`
+	ManagementOptions []option.RequestOption           `json:"-" yaml:"-" toml:"-"`
 
 	// IssuerDomains of the accepted issuers, used to generate the issuer URL. (e.g.: "dev-abcdefg.eu.auth0.com")
 	//

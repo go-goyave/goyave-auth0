@@ -49,7 +49,7 @@ type Authenticator[U any, C any, CC CustomClaims[C]] struct {
 // NewAuthenticator setup a JWKS caching provider, a JWT validator and a Goyave authenticator.
 // If your JWT isn't expected to hold custom claims, use [NoCustomClaims] for type C.
 // Type C must NOT be a pointer. Type CC can be inferred, no need to explicitly specify it.
-func NewAuthenticator[U any, C any, CC CustomClaims[C]](userService UserService[U], cfg *Config, validatorOptions ...validator.Option) (*Authenticator[U, C, CC], error) {
+func NewAuthenticator[U any, C any, CC CustomClaims[C]](userService UserService[U], cfg *Config) (*Authenticator[U, C, CC], error) {
 	issuerURLs, err := generateIssuerURLs(cfg.IssuerDomains)
 	if err != nil {
 		return nil, errors.New(err)
@@ -60,10 +60,11 @@ func NewAuthenticator[U any, C any, CC CustomClaims[C]](userService UserService[
 		cacheTTL = time.Duration(cfg.CacheTTL) * time.Second
 	}
 
-	provider, err := jwks.NewMultiIssuerProvider(
-		jwks.WithMultiIssuerCacheTTL(cacheTTL),
-		// TODO expose custom options for the provider
+	jwksOpts := append(
+		[]jwks.MultiIssuerProviderOption{jwks.WithMultiIssuerCacheTTL(cacheTTL)},
+		cfg.JWKSOptions...,
 	)
+	provider, err := jwks.NewMultiIssuerProvider(jwksOpts...)
 
 	if err != nil {
 		return nil, errors.Errorf("failed to create JWKS provider: %w", err)
@@ -78,7 +79,7 @@ func NewAuthenticator[U any, C any, CC CustomClaims[C]](userService UserService[
 		validator.WithCustomClaims(func() CC {
 			return CC(new(C))
 		}),
-	}, validatorOptions...)
+	}, cfg.ValidatorOptions...)
 	jwtValidator, err := validator.New(opts...)
 	if err != nil {
 		return nil, errors.Errorf("failed to create validator: %w", err)
@@ -86,7 +87,11 @@ func NewAuthenticator[U any, C any, CC CustomClaims[C]](userService UserService[
 
 	management := make(map[string]*managementClient.Management, len(cfg.IssuerDomains))
 	for _, url := range issuerURLs {
-		client, err := managementClient.New(url, option.WithClientCredentials(context.Background(), cfg.ClientID, cfg.ClientSecret)) // TODO expose custom options for the management client
+		managementOpts := append(
+			[]option.RequestOption{option.WithClientCredentials(context.Background(), cfg.ClientID, cfg.ClientSecret)},
+			cfg.ManagementOptions...,
+		)
+		client, err := managementClient.New(url, managementOpts...)
 		if err != nil {
 			return nil, errors.New(err)
 		}
