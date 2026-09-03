@@ -13,6 +13,14 @@ import (
 type Config struct {
 	Algorithm validator.SignatureAlgorithm
 
+	// ClientID your Auth0 application client ID. Used to retrieve user info
+	// from the management API on user registration.
+	ClientID string
+
+	// ClientSecret your Auth0 application client secret. Used to retrieve user info
+	// from the management API on user registration.
+	ClientSecret string
+
 	// IssuerDomains of the accepted issuers, used to generate the issuer URL. (e.g.: "dev-abcdefg.eu.auth0.com")
 	//
 	// The token must contain one of the specified issuers. Tokens without
@@ -44,6 +52,8 @@ func (Config) RuleSet() v.RuleSet {
 		{Path: "Audiences", Rules: v.List{v.Required(), v.Array(), v.Min(1)}},
 		{Path: "Audiences[]", Rules: v.List{v.String(), v.Min(1)}},
 		{Path: "Algorithm", Rules: v.List{v.Required(), v.String(), SignatureAlgorithm()}},
+		{Path: "ClientID", Rules: v.List{v.Required(), v.String()}},
+		{Path: "ClientSecret", Rules: v.List{v.Required(), v.String()}},
 	}
 }
 
@@ -55,6 +65,8 @@ func (Config) Default() Config {
 		Audiences:     []string{},
 		Algorithm:     validator.RS256,
 		CacheTTL:      15 * 60,
+		ClientID:      "",
+		ClientSecret:  "",
 	}
 }
 
@@ -64,6 +76,8 @@ func init() {
 	config.Register("auth.auth0.audiences", config.Entry{Value: []string{}, Type: reflect.String, IsSlice: true})
 	config.Register("auth.auth0.algorithm", config.Entry{Value: string(validator.RS256), Type: reflect.String})
 	config.Register("auth.auth0.cacheTTL", config.Entry{Value: 15 * 60, Type: reflect.Int})
+	config.Register("auth.auth0.clientId", config.Entry{Value: "", Type: reflect.String})
+	config.Register("auth.auth0.clientSecret", config.Entry{Value: "", Type: reflect.String})
 }
 
 // SignatureAlgorithmValidator converts the field under validation to the [validator.SignatureAlgorithm] string alias.

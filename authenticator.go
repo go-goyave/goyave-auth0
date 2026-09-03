@@ -6,6 +6,9 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/auth0/go-auth0/v3/management"
+	managementClient "github.com/auth0/go-auth0/v3/management/client"
+	"github.com/auth0/go-auth0/v3/management/option"
 	"github.com/auth0/go-jwt-middleware/v3/jwks"
 	"github.com/auth0/go-jwt-middleware/v3/validator"
 	"gorm.io/gorm"
@@ -13,10 +16,18 @@ import (
 	"goyave.dev/goyave/v5/util/errors"
 )
 
-// UserService is the dependency of [Authenticator] used to retrieve a user
-// using a JWT subject claim. See [Authenticator.SubjectFunc].
+// UserService is the dependency of [Authenticator].
 type UserService[T any] interface {
-	FindBySubject(ctx context.Context, subject string) (*T, error)
+	// GetBySubject returns a user stored in database using the token's subject.
+	// See [Authenticator.SubjectFunc].
+	GetBySubject(ctx context.Context, subject string) (*T, error)
+	// CreateFromAuth0 creates a user from the [management.GetUserResponseContent] retrieved from
+	// Auth0 using the authenticated user's access token and the Management API.
+	// This is called automatically if [UserService.FindBySubject] returns [gorm.ErrRecordNotFound], indicating
+	// the user doesn't exist in the database and that it's probably their first successful login.
+	//
+	// Important: your application must have the "read:users" permission on the Auth0 Management API.
+	CreateFromAuth0(ctx context.Context, userInfo *management.GetUserResponseContent) (*T, error)
 }
 
 // Authenticator Auth0 [goyave.dev/goyave/v5/auth.Authenticator] implementation.
@@ -25,8 +36,9 @@ type Authenticator[U any, C any, CC CustomClaims[C]] struct {
 
 	UserService UserService[U]
 
-	config    *Config
-	validator *validator.Validator
+	config     *Config
+	validator  *validator.Validator
+	management map[string]*managementClient.Management // map issuer url with management client
 
 	// SubjectFunc returns the value of the subject to use for user
 	// retrieval. The returned value is forwarded to the [UserService].
@@ -66,17 +78,26 @@ func NewAuthenticator[U any, C any, CC CustomClaims[C]](userService UserService[
 		validator.WithCustomClaims(func() CC {
 			return CC(new(C))
 		}),
-		// validator.WithCustomClaims[*C](newCustomClaims[C, *C]),
 	}, validatorOptions...)
 	jwtValidator, err := validator.New(opts...)
 	if err != nil {
 		return nil, errors.Errorf("failed to create validator: %w", err)
 	}
 
+	management := make(map[string]*managementClient.Management, len(cfg.IssuerDomains))
+	for _, url := range issuerURLs {
+		client, err := managementClient.New(url, option.WithClientCredentials(context.Background(), cfg.ClientID, cfg.ClientSecret)) // TODO expose custom options for the management client
+		if err != nil {
+			return nil, errors.New(err)
+		}
+		management[url] = client
+	}
+
 	return &Authenticator[U, C, CC]{
 		config:      cfg,
 		UserService: userService,
 		validator:   jwtValidator,
+		management:  management,
 	}, nil
 }
 
@@ -124,12 +145,14 @@ func (a *Authenticator[U, C, CC]) Authenticate(request *goyave.Request) (*U, err
 	request.Extra[ExtraAuth0Claims{}] = claims // Claims can be used later for permissions/scopes
 
 	// TODO allow retrieving user identity through profile too (simply by using the claims)
-	user, err := a.UserService.FindBySubject(request.Context(), a.getSubject(claims))
+	user, err := a.UserService.GetBySubject(request.Context(), a.getSubject(claims))
 	if err != nil {
 		if stderrors.Is(err, gorm.ErrRecordNotFound) {
-			return nil, stderrors.New(request.Lang.Get("auth.invalid-credentials"))
+			// First time this user logs in, create it in the application database.
+			return a.createUser(request.Context(), claims)
 		}
 		panic(errors.New(err)) // TODO for v6, change this: return error instead of panicking
+		// return nil, errors.New(err)
 	}
 
 	return user, nil
@@ -140,4 +163,25 @@ func (a *Authenticator[U, C, CC]) getSubject(claims *Claims[CC]) string {
 		return claims.RegisteredClaims.Subject
 	}
 	return a.SubjectFunc(claims)
+}
+
+func (a *Authenticator[U, C, CC]) createUser(ctx context.Context, claims *Claims[CC]) (*U, error) {
+	managementClient, ok := a.management[claims.RegisteredClaims.Issuer]
+	if !ok {
+		panic(errors.Errorf("could not find a management API client for issuer domain %q", claims.RegisteredClaims.Issuer)) // TODO for v6, change this: return error instead of panicking
+		// return nil, errors.Errorf("could not find a management API client for issuer domain %q", claims.RegisteredClaims.Issuer)
+	}
+
+	userData, err := managementClient.Users.Get(ctx, claims.RegisteredClaims.Subject, &management.GetUserRequestParameters{})
+	if err != nil {
+		panic(errors.New(err)) // TODO for v6, change this: return error instead of panicking
+		// return nil, errors.New(err)
+	}
+
+	user, err := a.UserService.CreateFromAuth0(ctx, userData)
+	if err != nil {
+		panic(errors.New(err)) // TODO for v6, change this: return error instead of panicking
+		// return nil, errors.New(err)
+	}
+	return user, nil
 }
