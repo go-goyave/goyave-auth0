@@ -12,7 +12,7 @@ import (
 const MetaScope = "goyave.auth0.scope"
 
 // ExtraAuth0Claims key for request extra storing [Claims].
-// Set by the [Authenticator].
+// Set by the [AppAuthenticator] and [Authenticator].
 type ExtraAuth0Claims struct{}
 
 // CustomClaims is a type constraint allowing reflection-less [validator.CustomClaims] pointer instanciation.

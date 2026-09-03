@@ -16,43 +16,19 @@ import (
 	"goyave.dev/goyave/v5/util/errors"
 )
 
-// UserService is the dependency of [Authenticator].
-type UserService[T any] interface {
-	// GetBySubject returns a user stored in database using the token's subject.
-	// See [Authenticator.SubjectFunc].
-	GetBySubject(ctx context.Context, subject string) (*T, error)
-	// CreateFromAuth0 creates a user from the [management.GetUserResponseContent] retrieved from
-	// Auth0 using the authenticated user's access token and the Management API.
-	// This is called automatically if [UserService.FindBySubject] returns [gorm.ErrRecordNotFound], indicating
-	// the user doesn't exist in the database and that it's probably their first successful login.
-	//
-	// Important: your application must have the "read:users" permission on the Auth0 Management API.
-	CreateFromAuth0(ctx context.Context, userInfo *management.GetUserResponseContent) (*T, error)
-}
-
-// Authenticator Auth0 [goyave.dev/goyave/v5/auth.Authenticator] implementation.
-type Authenticator[U any, C any, CC CustomClaims[C]] struct {
+// authenticator common implementation shared between [AppAuthenticator] and [Authenticator]. Only validates the token.
+type authenticator[U any, C any, CC CustomClaims[C]] struct {
 	goyave.Component
-
-	UserService UserService[U]
 
 	config     *Config
 	validator  *validator.Validator
 	management map[string]*managementClient.Management // map issuer url with management client
-
-	// SubjectFunc returns the value of the subject to use for user
-	// retrieval. The returned value is forwarded to the [UserService].
-	// By default, it returns the [validator.RegisteredClaims.Subject] (`sub` JWT claim).
-	SubjectFunc func(c *Claims[CC]) string
 }
 
-// NewAuthenticator setup a JWKS caching provider, a JWT validator and a Goyave authenticator.
-// If your JWT isn't expected to hold custom claims, use [NoCustomClaims] for type C.
-// Type C must NOT be a pointer. Type CC can be inferred, no need to explicitly specify it.
-func NewAuthenticator[U any, C any, CC CustomClaims[C]](userService UserService[U], cfg *Config) (*Authenticator[U, C, CC], error) {
+func newAuthenticator[U any, C any, CC CustomClaims[C]](cfg *Config) (authenticator[U, C, CC], error) {
 	issuerURLs, err := generateIssuerURLs(cfg.IssuerDomains)
 	if err != nil {
-		return nil, errors.New(err)
+		return authenticator[U, C, CC]{}, errors.New(err)
 	}
 
 	cacheTTL := 15 * time.Minute
@@ -67,7 +43,7 @@ func NewAuthenticator[U any, C any, CC CustomClaims[C]](userService UserService[
 	provider, err := jwks.NewMultiIssuerProvider(jwksOpts...)
 
 	if err != nil {
-		return nil, errors.Errorf("failed to create JWKS provider: %w", err)
+		return authenticator[U, C, CC]{}, errors.Errorf("failed to create JWKS provider: %w", err)
 	}
 
 	opts := append([]validator.Option{
@@ -82,7 +58,7 @@ func NewAuthenticator[U any, C any, CC CustomClaims[C]](userService UserService[
 	}, cfg.ValidatorOptions...)
 	jwtValidator, err := validator.New(opts...)
 	if err != nil {
-		return nil, errors.Errorf("failed to create validator: %w", err)
+		return authenticator[U, C, CC]{}, errors.Errorf("failed to create validator: %w", err)
 	}
 
 	management := make(map[string]*managementClient.Management, len(cfg.IssuerDomains))
@@ -93,16 +69,15 @@ func NewAuthenticator[U any, C any, CC CustomClaims[C]](userService UserService[
 		)
 		client, err := managementClient.New(url, managementOpts...)
 		if err != nil {
-			return nil, errors.New(err)
+			return authenticator[U, C, CC]{}, errors.New(err)
 		}
 		management[url] = client
 	}
 
-	return &Authenticator[U, C, CC]{
-		config:      cfg,
-		UserService: userService,
-		validator:   jwtValidator,
-		management:  management,
+	return authenticator[U, C, CC]{
+		config:     cfg,
+		validator:  jwtValidator,
+		management: management,
 	}, nil
 }
 
@@ -118,10 +93,11 @@ func generateIssuerURLs(domains []string) ([]string, error) {
 	return urls, nil
 }
 
-// Authenticate implementation of [goyave.dev/goyave/v5/auth.Authenticator.Authenticate].
-func (a *Authenticator[U, C, CC]) Authenticate(request *goyave.Request) (*U, error) {
+// authenticate implementation of [goyave.dev/goyave/v5/auth.Authenticator.Authenticate].
+func (a *authenticator[U, C, CC]) authenticate(request *goyave.Request) (*Claims[CC], error) {
 	token, ok := request.BearerToken()
 	// Note: DPoP is not supported
+	// TODO support DPoP later
 
 	if !ok {
 		return nil, stderrors.New(request.Lang.Get("auth.no-credentials-provided"))
@@ -148,9 +124,76 @@ func (a *Authenticator[U, C, CC]) Authenticate(request *goyave.Request) (*U, err
 	}
 
 	request.Extra[ExtraAuth0Claims{}] = claims // Claims can be used later for permissions/scopes
+	return claims, nil
+}
 
-	// TODO allow retrieving user identity through profile too (simply by using the claims)
-	user, err := a.UserService.GetBySubject(request.Context(), a.getSubject(claims))
+func (a *authenticator[U, C, CC]) getUser(ctx context.Context, claims *Claims[CC]) (*management.GetUserResponseContent, error) {
+	managementClient, ok := a.management[claims.RegisteredClaims.Issuer]
+	if !ok {
+		return nil, errors.Errorf("could not find a Management API client for issuer domain %q", claims.RegisteredClaims.Issuer)
+	}
+
+	userData, err := managementClient.Users.Get(ctx, claims.RegisteredClaims.Subject, &management.GetUserRequestParameters{})
+	if err != nil {
+		return nil, errors.New(err)
+	}
+	return userData, nil
+}
+
+// UserService is the dependency of [AppAuthenticator].
+type UserService[T any] interface {
+	// GetBySubject returns a user stored in database using the token's subject.
+	// See [AppAuthenticator.SubjectFunc].
+	GetBySubject(ctx context.Context, subject string) (*T, error)
+	// CreateFromAuth0 creates a user from the [management.GetUserResponseContent] retrieved from
+	// Auth0 using the authenticated user's access token and the Management API.
+	// This is called automatically if [UserService.FindBySubject] returns [gorm.ErrRecordNotFound], indicating
+	// the user doesn't exist in the database and that it's probably their first successful login.
+	CreateFromAuth0(ctx context.Context, userInfo *management.GetUserResponseContent) (*T, error)
+}
+
+// AppAuthenticator Auth0 [goyave.dev/goyave/v5/auth.Authenticator] implementation
+// sourcing the user from the application database.
+type AppAuthenticator[U any, C any, CC CustomClaims[C]] struct {
+	authenticator[U, C, CC]
+
+	userService UserService[U]
+
+	// SubjectFunc returns the value of the subject to use for user
+	// retrieval. The returned value is forwarded to the [UserService].
+	// By default, it returns the [validator.RegisteredClaims.Subject] (`sub` JWT claim).
+	SubjectFunc func(c *Claims[CC]) string
+}
+
+// NewAppAuthenticator create a new Goyave authenticator for Auth0-issued tokens.
+//
+// Once the token is validated, sources the user from the application database using the token's subject.
+// If the token is valid but the user doesn't exist in the application database, user profile is retrieved
+// from the Auth0 Management API and inserted into the application database.
+//
+// Important: your application must have the "read:users" permission on the Auth0 Management API.
+//
+// If your JWT isn't expected to hold custom claims, use [NoCustomClaims] for type C.
+// Type C must NOT be a pointer. Type CC can be inferred, no need to explicitly specify it.
+func NewAppAuthenticator[U any, C any, CC CustomClaims[C]](userService UserService[U], cfg *Config) (*AppAuthenticator[U, C, CC], error) {
+	a, err := newAuthenticator[U, C, CC](cfg)
+	if err != nil {
+		return nil, errors.New(err)
+	}
+
+	return &AppAuthenticator[U, C, CC]{
+		authenticator: a,
+		userService:   userService,
+	}, nil
+}
+
+func (a *AppAuthenticator[U, C, CC]) Authenticate(request *goyave.Request) (*U, error) {
+	claims, err := a.authenticate(request)
+	if err != nil {
+		return nil, err
+	}
+
+	user, err := a.userService.GetBySubject(request.Context(), a.getSubject(claims))
 	if err != nil {
 		if stderrors.Is(err, gorm.ErrRecordNotFound) {
 			// First time this user logs in, create it in the application database.
@@ -159,31 +202,63 @@ func (a *Authenticator[U, C, CC]) Authenticate(request *goyave.Request) (*U, err
 		panic(errors.New(err)) // TODO for v6, change this: return error instead of panicking
 		// return nil, errors.New(err)
 	}
-
 	return user, nil
 }
 
-func (a *Authenticator[U, C, CC]) getSubject(claims *Claims[CC]) string {
+func (a *AppAuthenticator[U, C, CC]) getSubject(claims *Claims[CC]) string {
 	if a.SubjectFunc == nil {
 		return claims.RegisteredClaims.Subject
 	}
 	return a.SubjectFunc(claims)
 }
 
-func (a *Authenticator[U, C, CC]) createUser(ctx context.Context, claims *Claims[CC]) (*U, error) {
-	managementClient, ok := a.management[claims.RegisteredClaims.Issuer]
-	if !ok {
-		panic(errors.Errorf("could not find a management API client for issuer domain %q", claims.RegisteredClaims.Issuer)) // TODO for v6, change this: return error instead of panicking
-		// return nil, errors.Errorf("could not find a management API client for issuer domain %q", claims.RegisteredClaims.Issuer)
-	}
-
-	userData, err := managementClient.Users.Get(ctx, claims.RegisteredClaims.Subject, &management.GetUserRequestParameters{})
+func (a *AppAuthenticator[U, C, CC]) createUser(ctx context.Context, claims *Claims[CC]) (*U, error) {
+	userData, err := a.getUser(ctx, claims)
 	if err != nil {
 		panic(errors.New(err)) // TODO for v6, change this: return error instead of panicking
 		// return nil, errors.New(err)
 	}
 
-	user, err := a.UserService.CreateFromAuth0(ctx, userData)
+	user, err := a.userService.CreateFromAuth0(ctx, userData)
+	if err != nil {
+		panic(errors.New(err)) // TODO for v6, change this: return error instead of panicking
+		// return nil, errors.New(err)
+	}
+	return user, nil
+}
+
+// Authenticator Auth0 [goyave.dev/goyave/v5/auth.Authenticator] implementation
+// sourcing the user from the Auth0 user database using the Management API.
+type Authenticator[C any, CC CustomClaims[C]] struct {
+	authenticator[*management.GetUserResponseContent, C, CC]
+}
+
+// NewAuthenticator create a new Goyave authenticator for Auth0-issued tokens.
+//
+// Once the token is validated, sources the user from the Auth0 user database using the Management API.
+//
+// Important: your application must have the "read:users" permission on the Auth0 Management API.
+//
+// If your JWT isn't expected to hold custom claims, use [NoCustomClaims] for type C.
+// Type C must NOT be a pointer. Type CC can be inferred, no need to explicitly specify it.
+func NewAuthenticator[C any, CC CustomClaims[C]](cfg *Config) (*Authenticator[C, CC], error) {
+	a, err := newAuthenticator[*management.GetUserResponseContent, C, CC](cfg)
+	if err != nil {
+		return nil, errors.New(err)
+	}
+
+	return &Authenticator[C, CC]{
+		authenticator: a,
+	}, nil
+}
+
+func (a *Authenticator[C, CC]) Authenticate(request *goyave.Request) (*management.GetUserResponseContent, error) {
+	claims, err := a.authenticate(request)
+	if err != nil {
+		return nil, err
+	}
+
+	user, err := a.getUser(request.Context(), claims)
 	if err != nil {
 		panic(errors.New(err)) // TODO for v6, change this: return error instead of panicking
 		// return nil, errors.New(err)

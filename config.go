@@ -11,7 +11,7 @@ import (
 	v "goyave.dev/goyave/v5/validation"
 )
 
-// Config for the Auth0 [Authenticator].
+// Config for the Auth0 [AppAuthenticator] and [Authenticator].
 type Config struct {
 	Algorithm validator.SignatureAlgorithm
 
