@@ -123,6 +123,7 @@ func (a *Authenticator[U, C, CC]) Authenticate(request *goyave.Request) (*U, err
 
 	request.Extra[ExtraAuth0Claims{}] = claims // Claims can be used later for permissions/scopes
 
+	// TODO allow retrieving user identity through profile too (simply by using the claims)
 	user, err := a.UserService.FindBySubject(request.Context(), a.getSubject(claims))
 	if err != nil {
 		if stderrors.Is(err, gorm.ErrRecordNotFound) {

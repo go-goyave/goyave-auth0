@@ -36,9 +36,3 @@ type NoCustomClaims struct{}
 func (*NoCustomClaims) Validate(_ context.Context) error {
 	return nil
 }
-
-// ScopeClaims extension of custom claims that hold scope permissions information.
-type ScopeClaims interface {
-	validator.CustomClaims
-	HasScope(scope string) bool
-}
