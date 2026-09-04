@@ -26,7 +26,7 @@ type authenticator[U any, C any, CC CustomClaims[C]] struct {
 }
 
 func newAuthenticator[U any, C any, CC CustomClaims[C]](cfg *Config) (authenticator[U, C, CC], error) {
-	issuerURLs, err := generateIssuerURLs(cfg.IssuerDomains)
+	issuerURLs, err := generateIssuerURLs(cfg.IssuerDomains, cfg.useHTTP)
 	if err != nil {
 		return authenticator[U, C, CC]{}, errors.New(err)
 	}
@@ -41,7 +41,6 @@ func newAuthenticator[U any, C any, CC CustomClaims[C]](cfg *Config) (authentica
 		cfg.JWKSOptions...,
 	)
 	provider, err := jwks.NewMultiIssuerProvider(jwksOpts...)
-
 	if err != nil {
 		return authenticator[U, C, CC]{}, errors.Errorf("failed to create JWKS provider: %w", err)
 	}
@@ -81,10 +80,14 @@ func newAuthenticator[U any, C any, CC CustomClaims[C]](cfg *Config) (authentica
 	}, nil
 }
 
-func generateIssuerURLs(domains []string) ([]string, error) {
+func generateIssuerURLs(domains []string, useHTTP bool) ([]string, error) {
+	protocol := "https"
+	if useHTTP {
+		protocol = "http"
+	}
 	urls := make([]string, 0, len(domains))
 	for _, domain := range domains {
-		url, err := url.Parse("https://" + domain + "/")
+		url, err := url.Parse(protocol + "://" + domain + "/")
 		if err != nil {
 			return nil, errors.Errorf("failed to parse issuer URL: %w", err)
 		}

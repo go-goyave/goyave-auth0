@@ -47,6 +47,9 @@ type Config struct {
 	// See [jwks.WithCacheTTL] for more information.
 	// Defaults to 15 minutes.
 	CacheTTL int
+
+	// useHTTP for issuer URLs. Only used in tests.
+	useHTTP bool
 }
 
 // RuleSet returns the validation rules for this configuration section.
