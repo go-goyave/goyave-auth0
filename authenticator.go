@@ -149,7 +149,7 @@ type UserService[T any] interface {
 	// Auth0 using the authenticated user's access token and the Management API.
 	// This is called automatically if [UserService.FindBySubject] returns [gorm.ErrRecordNotFound], indicating
 	// the user doesn't exist in the database and that it's probably their first successful login.
-	CreateFromAuth0(ctx context.Context, userInfo *management.GetUserResponseContent) (*T, error)
+	CreateFromAuth0(ctx context.Context, userProfile *management.GetUserResponseContent) (*T, error)
 }
 
 // AppAuthenticator Auth0 [goyave.dev/goyave/v5/auth.Authenticator] implementation

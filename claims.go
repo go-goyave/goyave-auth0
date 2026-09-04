@@ -6,16 +6,11 @@ import (
 	"github.com/auth0/go-jwt-middleware/v3/validator"
 )
 
-// MetaScope route meta associated with a string value indicating the
-// authenticated user's required scope to access it.
-// Use in combination with the [ScopeMiddleware].
-const MetaScope = "goyave.auth0.scope"
-
 // ExtraAuth0Claims key for request extra storing [Claims].
 // Set by the [AppAuthenticator] and [Authenticator].
 type ExtraAuth0Claims struct{}
 
-// CustomClaims is a type constraint allowing reflection-less [validator.CustomClaims] pointer instanciation.
+// CustomClaims is a type constraint allowing reflection-less [validator.CustomClaims] pointer instantiation.
 // Implementation should use a pointer receiver on the Validate method.
 type CustomClaims[T any] interface {
 	*T
