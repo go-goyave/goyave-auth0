@@ -91,12 +91,15 @@ type SignatureAlgorithmValidator struct{ v.BaseValidator }
 
 // Validate validates the given data. Set [v.Context.Value] to [validator.SignatureAlgorithm] if it passes.
 func (v *SignatureAlgorithmValidator) Validate(ctx *v.Context) bool {
-	str, ok := ctx.Value.(string)
-	if !ok {
+	switch v := ctx.Value.(type) {
+	case string:
+		ctx.Value = validator.SignatureAlgorithm(v)
+	case validator.SignatureAlgorithm:
+		ctx.Value = v
+	default:
 		return false
 	}
 
-	ctx.Value = validator.SignatureAlgorithm(str)
 	return true
 }
 

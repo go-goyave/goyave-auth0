@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	github.com/auth0/go-auth0/v3 v3.4.0
 	github.com/auth0/go-jwt-middleware/v3 v3.3.0
+	github.com/stretchr/testify v1.12.1
 	gorm.io/gorm v1.31.2
 	goyave.dev/goyave/v5 v5.12.2
 )
@@ -31,6 +32,7 @@ require (
 	github.com/samber/lo v1.53.0 // indirect
 	github.com/segmentio/asm v1.2.1 // indirect
 	github.com/valyala/fastjson v1.6.10 // indirect
+	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/crypto v0.55.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
