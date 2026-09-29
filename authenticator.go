@@ -201,7 +201,8 @@ func (a *AppAuthenticator[U, C, CC]) Authenticate(request *goyave.Request) (*U, 
 
 	user, err := a.userService.GetBySubject(request.Context(), a.getSubject(claims))
 	if err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
+		_, isNotFound := errors.AsType[*goyave.NotFoundError](err)
+		if errors.Is(err, gorm.ErrRecordNotFound) || isNotFound {
 			// First time this user logs in, create it in the application database.
 			return a.createUser(request.Context(), claims)
 		}

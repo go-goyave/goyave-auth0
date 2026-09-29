@@ -22,7 +22,6 @@ import (
 	"github.com/lestrrat-go/jwx/v3/jwt"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"gorm.io/gorm"
 	"goyave.dev/goyave/v6"
 	"goyave.dev/goyave/v6/lang"
 	"goyave.dev/goyave/v6/util/errwrap"
@@ -53,7 +52,7 @@ func (m *mockUserService) CreateFromAuth0(_ context.Context, userProfile *manage
 func (m *mockUserService) GetBySubject(_ context.Context, subject string) (*mockUser, error) {
 	m.gotSubject = subject
 	if m.user == nil {
-		return nil, gorm.ErrRecordNotFound
+		return nil, goyave.NotFound("")
 	}
 	return m.user, m.getErr
 }
