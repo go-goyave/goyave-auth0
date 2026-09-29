@@ -19,32 +19,53 @@ go get -u goyave.dev/auth0@latest github.com/auth0/go-auth0/v3@latest github.com
 
 ### Configuration
 
-Add the following section to your configuration:
+Add the Auth0 config to your configuration structure:
 
+```go
+type Config struct{
+    config.Base
+    Auth0 auth0.Config
+}
+
+func (c Config) RuleSet() v.RuleSet {
+	return v.RuleSet{
+		{Path: v.CurrentElement, Rules: c.Base.RuleSet()},
+		{Path: "Auth0", Rules: c.Auth0.RuleSet()},
+		//...
+	}
+}
+
+func (s Config) Default() Config {
+	return Config{
+		Base:  c.Base.Default(),
+		Auth0: c.Auth0.Default(),
+		//...
+	}
+}
+```
 ```jsonc
 {
     //...
-    "auth": {
-        "auth0": {
-            "issuerDomains": [
-                "dev-abcdefg.eu.auth0.com"
-            ],
-            "audiences": [
-                "https://dev-abcdefg.eu.auth0.com/api/v2/"
-            ],
-            "cacheTTL": 300, // The number of seconds for the JWT cache refresh interval.
-            "clientId": "xxxxxxxxxxxxxxxxx",
-            "clientSecret": "xxxxxxxxxxxxxxxxx"
-        }
+    "Auth0": {
+        "Algorithm": "RS256",
+        "IssuerDomains": [
+            "dev-abcdefg.eu.auth0.com"
+        ],
+        "Audiences": [
+            "https://dev-abcdefg.eu.auth0.com/api/v2/"
+        ],
+        "CacheTTL": 300, // The number of seconds for the JWT cache refresh interval.
+        "ClientId": "xxxxxxxxxxxxxxxxx",
+        "ClientSecret": "xxxxxxxxxxxxxxxxx"
     }
 }
 ```
 
 The authenticator supports mutiple issuers and/or audiences:
-- the token must contain one of the issuers (`iss`) specified in `auth.auth0.issuerDomains`. Tokens without any matching issuer will be rejected.
-- the token must contain at least one of the audiences (`aud`) specified in `auth.auth0.audiences`. Tokens without any matching audience will be rejected.
+- the token must contain one of the issuers (`iss`) specified in `Config.Auth0.IssuerDomains`. Tokens without any matching issuer will be rejected.
+- the token must contain at least one of the audiences (`aud`) specified in `Config.Auth0.Audiences`. Tokens without any matching audience will be rejected.
 
-Then fill out the `auth0.Config` structure:
+Additional non-serializable options are available and can be passed to `NewAuthenticator` and `NewAppAuthenticator`:
 ```go
 import (
     "github.com/auth0/go-auth0/v3/management/option"
@@ -53,20 +74,9 @@ import (
 	"goyave.dev/auth0"
 )
 
-config := server.Config()
-auth0Cfg := &auth0.Config{
-    ClientID:      config.GetString("auth.auth0.clientId"),
-    ClientSecret:  config.GetString("auth.auth0.clientSecret"),
-    IssuerDomains: config.GetStringSlice("auth.auth0.issuerDomains"),
-    Audiences:     config.GetStringSlice("auth.auth0.audiences"),
-    CacheTTL:      config.GetInt("auth.auth0.cacheTTL"),
-    Algorithm:     validator.RS256,
-
-    // Optional: validator, JWKS and Management client options
-    ValidatorOptions:  []validator.Option{},
-    JWKSOptions:       []jwks.MultiIssuerProviderOption{},
-    ManagementOptions: []option.RequestOption{},
-}
+auth0.WithJWKSOptions(...)
+auth0.WithManagementOptions(...)
+auth0.WithValidatorOptions(...)
 ```
 
 ### Application-managed users
@@ -83,7 +93,7 @@ When using the `auth0.AppAuthenticator`, your user service must implement the `a
 func (s *Service) GetBySubject(ctx context.Context, subject string) (*dto.InternalUser, error) {
 	user, err := s.Repository.GetByAuth0UserID(ctx, subject)
 	if err != nil {
-		return nil, errors.New(err)
+		return nil, errwrap.New(err)
 	}
 	return typeutil.MustConvert[*dto.InternalUser](user), nil
 }
@@ -97,7 +107,7 @@ func (s *Service) CreateFromAuth0(ctx context.Context, userProfile *management.G
 	}
 	user, err := s.Repository.Create(ctx, user)
 	if err != nil {
-		return nil, errors.New(err)
+		return nil, errwrap.New(err)
 	}
 	return typeutil.MustConvert[*dto.InternalUser](user), nil
 }
@@ -120,7 +130,7 @@ func (r *User) GetByAuth0UserID(ctx context.Context, auth0UserID string) (*model
     err := session.DB(ctx, r.DB).Where("auth0_user_id", auth0UserID).First(&user)
 
 	if err != nil {
-		return nil, errors.New(err)
+		return nil, errwrap.New(err)
 	}
 	return user, nil
 }
@@ -237,4 +247,5 @@ func (ctrl *Controller) ShowProfile(response *goyave.Response, request *goyave.R
 ## Limitations
 
 - This implementation currently doesn't support DPoP.
+- This implementation currently doesn't support Machine-to-machine authentication, only User-to-machine.
 - When managing your users within your application, user and metadata updates are not automatic. You need to create an [event stream](https://auth0.com/docs/customize/events) to notify your API of the changes. Exact flow and implementation will differ depending on your systems. Support for updates is out of scope for this library.

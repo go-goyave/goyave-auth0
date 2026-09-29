@@ -23,10 +23,10 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"gorm.io/gorm"
-	"goyave.dev/goyave/v5"
-	"goyave.dev/goyave/v5/lang"
-	"goyave.dev/goyave/v5/util/errors"
-	"goyave.dev/goyave/v5/util/testutil"
+	"goyave.dev/goyave/v6"
+	"goyave.dev/goyave/v6/lang"
+	"goyave.dev/goyave/v6/util/errwrap"
+	"goyave.dev/goyave/v6/util/testutil"
 )
 
 type mockUser struct {
@@ -176,7 +176,7 @@ func TestAppAuthenticator(t *testing.T) {
 	cases := []struct {
 		desc                 string
 		service              *mockUserService
-		cfg                  func(issuerDomain string) *Config
+		cfg                  func(issuerDomain string) (*Config, []Option)
 		managementHTTPClient *mockHTTPClient
 		subjectFunc          func(c *Claims[*testCustomClaims]) string
 		tokenBuilder         func(t *testing.T, issuerURL string) *jwt.Builder
@@ -185,7 +185,6 @@ func TestAppAuthenticator(t *testing.T) {
 		wantUser             *mockUser
 		wantSubject          string
 		wantCustomClaims     *testCustomClaims
-		expectPanic          bool
 	}{
 		{
 			desc: "OK_user_created",
@@ -194,14 +193,14 @@ func TestAppAuthenticator(t *testing.T) {
 				createErr: nil,
 				getErr:    nil,
 			},
-			cfg: func(issuerURL string) *Config {
+			cfg: func(issuerURL string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     validator.RS256,
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{issuerURL},
 					Audiences:     []string{"http://localhost/authorize"},
-				}
+				}, []Option{}
 			},
 			managementHTTPClient: &mockHTTPClient{
 				profile: &management.GetUserResponseContent{
@@ -243,14 +242,14 @@ func TestAppAuthenticator(t *testing.T) {
 				createErr: nil,
 				getErr:    nil,
 			},
-			cfg: func(issuerURL string) *Config {
+			cfg: func(issuerURL string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     validator.RS256,
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{issuerURL},
 					Audiences:     []string{"http://localhost/authorize"},
-				}
+				}, []Option{}
 			},
 			managementHTTPClient: &mockHTTPClient{
 				profile:  nil, // We don't expect a call on the management API
@@ -287,14 +286,14 @@ func TestAppAuthenticator(t *testing.T) {
 				createErr: nil,
 				getErr:    nil,
 			},
-			cfg: func(issuerURL string) *Config {
+			cfg: func(issuerURL string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     validator.RS256,
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{issuerURL},
 					Audiences:     []string{"http://localhost/authorize"},
-				}
+				}, []Option{}
 			},
 			subjectFunc: func(c *Claims[*testCustomClaims]) string {
 				return c.CustomClaims.CustomField
@@ -323,14 +322,14 @@ func TestAppAuthenticator(t *testing.T) {
 		{
 			desc:    "token_expired",
 			service: &mockUserService{},
-			cfg: func(issuerURL string) *Config {
+			cfg: func(issuerURL string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     validator.RS256,
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{issuerURL},
 					Audiences:     []string{"http://localhost/authorize"},
-				}
+				}, []Option{}
 			},
 			managementHTTPClient: &mockHTTPClient{},
 			tokenBuilder: func(_ *testing.T, issuerURL string) *jwt.Builder {
@@ -345,73 +344,70 @@ func TestAppAuthenticator(t *testing.T) {
 					Claim("custom_field", "custom_value") // Custom claim
 			},
 			wantInitErr:      nil,
-			wantAuthErr:      errors.New(lang.Default.Get("auth.invalid-credentials")),
+			wantAuthErr:      goyave.Unauthorized(lang.Default.Get("auth.invalid-credentials")),
 			wantUser:         nil,
 			wantCustomClaims: nil,
 		},
 		{
 			desc:    "invalid_issuer_url",
 			service: &mockUserService{},
-			cfg: func(_ string) *Config {
+			cfg: func(_ string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     validator.RS256,
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{"nota\x7fdomain"},
 					Audiences:     []string{"http://localhost/authorize"},
-				}
+				}, []Option{}
 			},
 			managementHTTPClient: &mockHTTPClient{},
-			wantInitErr:          errors.New("failed to parse issuer URL: "),
+			wantInitErr:          errwrap.New("failed to parse issuer URL: "),
 		},
 		{
 			desc:    "jwks_init_failure",
 			service: &mockUserService{},
-			cfg: func(issuerURL string) *Config {
+			cfg: func(issuerURL string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     validator.RS256,
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{issuerURL},
 					Audiences:     []string{"http://localhost/authorize"},
-					JWKSOptions: []jwks.MultiIssuerProviderOption{
-						jwks.WithIssuerKeyConfig("fake_issuer", jwks.IssuerKeyConfig{Algorithm: validator.RS256, Secret: []byte("secret")}),
-					},
-				}
+				}, []Option{WithJWKSOptions(jwks.WithIssuerKeyConfig("fake_issuer", jwks.IssuerKeyConfig{Algorithm: validator.RS256, Secret: []byte("secret")}))}
 			},
 			managementHTTPClient: &mockHTTPClient{},
-			wantInitErr:          errors.New("failed to create JWKS provider: "),
+			wantInitErr:          errwrap.New("failed to create JWKS provider: "),
 		},
 		{
 			desc:    "validator_init_failure",
 			service: &mockUserService{},
-			cfg: func(issuerURL string) *Config {
+			cfg: func(issuerURL string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     "not an alg",
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{issuerURL},
 					Audiences:     []string{"http://localhost/authorize"},
-				}
+				}, []Option{}
 			},
 			managementHTTPClient: &mockHTTPClient{},
-			wantInitErr:          errors.New("failed to create validator: "),
+			wantInitErr:          errwrap.New("failed to create validator: "),
 		},
 		{
 			desc: "user_retrieval_error",
 			service: &mockUserService{
 				user:      &mockUser{},
 				createErr: nil,
-				getErr:    errors.New("test error"),
+				getErr:    errwrap.New("test error"),
 			},
-			cfg: func(issuerURL string) *Config {
+			cfg: func(issuerURL string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     validator.RS256,
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{issuerURL},
 					Audiences:     []string{"http://localhost/authorize"},
-				}
+				}, []Option{}
 			},
 			managementHTTPClient: &mockHTTPClient{},
 			tokenBuilder: func(_ *testing.T, issuerURL string) *jwt.Builder {
@@ -426,27 +422,26 @@ func TestAppAuthenticator(t *testing.T) {
 					Claim("custom_field", "custom_value") // Custom claim
 			},
 			wantInitErr:      nil,
-			wantAuthErr:      nil,
+			wantAuthErr:      errwrap.New("test error"),
 			wantUser:         nil,
 			wantSubject:      "auth0|abcdefghijklmnop",
 			wantCustomClaims: &testCustomClaims{CustomField: "custom_value"},
-			expectPanic:      true,
 		},
 		{
 			desc: "user_creation_error",
 			service: &mockUserService{
 				user:      nil,
-				createErr: errors.New("test error"),
+				createErr: errwrap.New("test error"),
 				getErr:    nil,
 			},
-			cfg: func(issuerURL string) *Config {
+			cfg: func(issuerURL string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     validator.RS256,
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{issuerURL},
 					Audiences:     []string{"http://localhost/authorize"},
-				}
+				}, []Option{}
 			},
 			managementHTTPClient: &mockHTTPClient{
 				profile: &management.GetUserResponseContent{
@@ -470,11 +465,10 @@ func TestAppAuthenticator(t *testing.T) {
 					Claim("custom_field", "custom_value") // Custom claim
 			},
 			wantInitErr:      nil,
-			wantAuthErr:      nil,
+			wantAuthErr:      errwrap.New("test error"),
 			wantUser:         nil,
 			wantSubject:      "auth0|abcdefghijklmnop",
 			wantCustomClaims: &testCustomClaims{CustomField: "custom_value"},
-			expectPanic:      true,
 		},
 		{
 			desc: "management_api_request_error",
@@ -483,19 +477,19 @@ func TestAppAuthenticator(t *testing.T) {
 				createErr: nil,
 				getErr:    nil,
 			},
-			cfg: func(issuerURL string) *Config {
+			cfg: func(issuerURL string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     validator.RS256,
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{issuerURL},
 					Audiences:     []string{"http://localhost/authorize"},
-				}
+				}, []Option{}
 			},
 			managementHTTPClient: &mockHTTPClient{
 				profile:  nil,
 				response: nil,
-				err:      errors.New("test error"),
+				err:      errwrap.New("test error"),
 			},
 			tokenBuilder: func(_ *testing.T, issuerURL string) *jwt.Builder {
 				issuedAt := time.Now().Add(-time.Second * 30)
@@ -509,11 +503,10 @@ func TestAppAuthenticator(t *testing.T) {
 					Claim("custom_field", "custom_value") // Custom claim
 			},
 			wantInitErr:      nil,
-			wantAuthErr:      nil,
+			wantAuthErr:      errwrap.New("test error"),
 			wantUser:         nil,
 			wantSubject:      "auth0|abcdefghijklmnop",
 			wantCustomClaims: &testCustomClaims{CustomField: "custom_value"},
-			expectPanic:      true,
 		},
 	}
 
@@ -522,10 +515,10 @@ func TestAppAuthenticator(t *testing.T) {
 			jwksServer, privateKey := setupJWKSServer(t)
 			issuerURL := jwksServer.URL + "/"
 
-			cfg := c.cfg(jwksServer.Listener.Addr().String())
+			cfg, opts := c.cfg(jwksServer.Listener.Addr().String())
 			cfg.useHTTP = true
-			cfg.ManagementOptions = append(cfg.ManagementOptions, option.WithHTTPClient(c.managementHTTPClient))
-			authenticator, err := NewAppAuthenticator[mockUser, testCustomClaims](c.service, cfg)
+			opts = append(opts, WithManagementOptions(option.WithHTTPClient(c.managementHTTPClient)))
+			authenticator, err := NewAppAuthenticator[mockUser, testCustomClaims](c.service, cfg, opts...)
 			if c.wantInitErr != nil {
 				require.Error(t, err)
 				require.ErrorContains(t, err, c.wantInitErr.Error())
@@ -543,25 +536,17 @@ func TestAppAuthenticator(t *testing.T) {
 				authenticator.SubjectFunc = c.subjectFunc
 			}
 
-			request := testutil.NewTestRequest(http.MethodGet, "/profile", nil)
+			request := testutil.NewTestRequest(t.Context(), http.MethodGet, "/profile", nil)
 			request.Lang = lang.Default
 			if c.tokenBuilder != nil {
 				token := genreateToken(t, c.tokenBuilder(t, issuerURL), privateKey)
 				request.Header().Set("Authorization", "Bearer "+token)
 			}
-			var user *mockUser
-			if c.expectPanic {
-				assert.Panics(t, func() {
-					user, err = authenticator.Authenticate(request)
-				})
-			} else {
-				assert.NotPanics(t, func() {
-					user, err = authenticator.Authenticate(request)
-				})
-			}
+			user, err := authenticator.Authenticate(request)
 			if c.wantAuthErr != nil {
 				require.Error(t, err)
 				require.ErrorContains(t, err, c.wantAuthErr.Error())
+				require.IsType(t, c.wantAuthErr, err) //nolint:testifylint // We want to check the error has the expected type (ClientError or not), not really strict equality (since wrapper stacktrace will differ)
 			} else {
 				require.NoError(t, err)
 			}
@@ -578,24 +563,23 @@ func TestAppAuthenticator(t *testing.T) {
 func TestAuthenticator(t *testing.T) {
 	cases := []struct {
 		desc                 string
-		cfg                  func(issuerDomain string) *Config
+		cfg                  func(issuerDomain string) (*Config, []Option)
 		managementHTTPClient *mockHTTPClient
 		tokenBuilder         func(t *testing.T, issuerURL string) *jwt.Builder
 		wantInitErr          error
 		wantAuthErr          error
 		wantCustomClaims     *testCustomClaims
-		expectPanic          bool
 	}{
 		{
 			desc: "OK",
-			cfg: func(issuerURL string) *Config {
+			cfg: func(issuerURL string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     validator.RS256,
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{issuerURL},
 					Audiences:     []string{"http://localhost/authorize"},
-				}
+				}, []Option{}
 			},
 			managementHTTPClient: &mockHTTPClient{
 				profile: &management.GetUserResponseContent{
@@ -624,14 +608,14 @@ func TestAuthenticator(t *testing.T) {
 		},
 		{
 			desc: "token_expired",
-			cfg: func(issuerURL string) *Config {
+			cfg: func(issuerURL string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     validator.RS256,
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{issuerURL},
 					Audiences:     []string{"http://localhost/authorize"},
-				}
+				}, []Option{}
 			},
 			managementHTTPClient: &mockHTTPClient{},
 			tokenBuilder: func(_ *testing.T, issuerURL string) *jwt.Builder {
@@ -646,69 +630,66 @@ func TestAuthenticator(t *testing.T) {
 					Claim("custom_field", "custom_value") // Custom claim
 			},
 			wantInitErr:      nil,
-			wantAuthErr:      errors.New(lang.Default.Get("auth.invalid-credentials")),
+			wantAuthErr:      goyave.Unauthorized(lang.Default.Get("auth.invalid-credentials")),
 			wantCustomClaims: nil,
 		},
 		{
 			desc: "invalid_issuer_url",
-			cfg: func(_ string) *Config {
+			cfg: func(_ string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     validator.RS256,
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{"nota\x7fdomain"},
 					Audiences:     []string{"http://localhost/authorize"},
-				}
+				}, []Option{}
 			},
 			managementHTTPClient: &mockHTTPClient{},
-			wantInitErr:          errors.New("failed to parse issuer URL: "),
+			wantInitErr:          errwrap.New("failed to parse issuer URL: "),
 		},
 		{
 			desc: "jwks_init_failure",
-			cfg: func(issuerURL string) *Config {
+			cfg: func(issuerURL string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     validator.RS256,
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{issuerURL},
 					Audiences:     []string{"http://localhost/authorize"},
-					JWKSOptions: []jwks.MultiIssuerProviderOption{
-						jwks.WithIssuerKeyConfig("fake_issuer", jwks.IssuerKeyConfig{Algorithm: validator.RS256, Secret: []byte("secret")}),
-					},
-				}
+				}, []Option{WithJWKSOptions(jwks.WithIssuerKeyConfig("fake_issuer", jwks.IssuerKeyConfig{Algorithm: validator.RS256, Secret: []byte("secret")}))}
 			},
 			managementHTTPClient: &mockHTTPClient{},
-			wantInitErr:          errors.New("failed to create JWKS provider: "),
+			wantInitErr:          errwrap.New("failed to create JWKS provider: "),
 		},
 		{
 			desc: "validator_init_failure",
-			cfg: func(issuerURL string) *Config {
+			cfg: func(issuerURL string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     "not an alg",
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{issuerURL},
 					Audiences:     []string{"http://localhost/authorize"},
-				}
+				}, []Option{}
 			},
 			managementHTTPClient: &mockHTTPClient{},
-			wantInitErr:          errors.New("failed to create validator: "),
+			wantInitErr:          errwrap.New("failed to create validator: "),
 		},
 		{
 			desc: "management_api_request_error",
-			cfg: func(issuerURL string) *Config {
+			cfg: func(issuerURL string) (*Config, []Option) {
 				return &Config{
 					Algorithm:     validator.RS256,
 					ClientID:      "test-client-id",
 					ClientSecret:  "test-client-secret",
 					IssuerDomains: []string{issuerURL},
 					Audiences:     []string{"http://localhost/authorize"},
-				}
+				}, []Option{}
 			},
 			managementHTTPClient: &mockHTTPClient{
 				profile:  nil,
 				response: nil,
-				err:      errors.New("test error"),
+				err:      errwrap.New("test error"),
 			},
 			tokenBuilder: func(_ *testing.T, issuerURL string) *jwt.Builder {
 				issuedAt := time.Now().Add(-time.Second * 30)
@@ -722,9 +703,8 @@ func TestAuthenticator(t *testing.T) {
 					Claim("custom_field", "custom_value") // Custom claim
 			},
 			wantInitErr:      nil,
-			wantAuthErr:      nil,
+			wantAuthErr:      errwrap.New("test error"),
 			wantCustomClaims: &testCustomClaims{CustomField: "custom_value"},
-			expectPanic:      true,
 		},
 	}
 
@@ -733,10 +713,10 @@ func TestAuthenticator(t *testing.T) {
 			jwksServer, privateKey := setupJWKSServer(t)
 			issuerURL := jwksServer.URL + "/"
 
-			cfg := c.cfg(jwksServer.Listener.Addr().String())
+			cfg, opts := c.cfg(jwksServer.Listener.Addr().String())
 			cfg.useHTTP = true
-			cfg.ManagementOptions = append(cfg.ManagementOptions, option.WithHTTPClient(c.managementHTTPClient))
-			authenticator, err := NewAuthenticator[testCustomClaims](cfg)
+			opts = append(opts, WithManagementOptions(option.WithHTTPClient(c.managementHTTPClient)))
+			authenticator, err := NewAuthenticator[testCustomClaims](cfg, opts...)
 			if c.wantInitErr != nil {
 				require.Error(t, err)
 				require.ErrorContains(t, err, c.wantInitErr.Error())
@@ -749,25 +729,17 @@ func TestAuthenticator(t *testing.T) {
 			assert.NotNil(t, authenticator.validator)
 			assert.NotNil(t, authenticator.management)
 
-			request := testutil.NewTestRequest(http.MethodGet, "/profile", nil)
+			request := testutil.NewTestRequest(t.Context(), http.MethodGet, "/profile", nil)
 			request.Lang = lang.Default
 			if c.tokenBuilder != nil {
 				token := genreateToken(t, c.tokenBuilder(t, issuerURL), privateKey)
 				request.Header().Set("Authorization", "Bearer "+token)
 			}
-			var user *management.GetUserResponseContent
-			if c.expectPanic {
-				assert.Panics(t, func() {
-					user, err = authenticator.Authenticate(request)
-				})
-			} else {
-				assert.NotPanics(t, func() {
-					user, err = authenticator.Authenticate(request)
-				})
-			}
+			user, err := authenticator.Authenticate(request)
 			if c.wantAuthErr != nil {
 				require.Error(t, err)
 				require.ErrorContains(t, err, c.wantAuthErr.Error())
+				require.IsType(t, c.wantAuthErr, err) //nolint:testifylint // We want to check the error has the expected type (ClientError or not), not really strict equality (since wrapper stacktrace will differ)
 			} else {
 				require.NoError(t, err)
 			}

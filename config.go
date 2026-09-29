@@ -1,14 +1,11 @@
 package auth0
 
 import (
-	"reflect"
-
 	"github.com/auth0/go-auth0/v3/management/option"
 	"github.com/auth0/go-jwt-middleware/v3/jwks"
 	"github.com/auth0/go-jwt-middleware/v3/validator"
-	"goyave.dev/goyave/v5/config"
-	"goyave.dev/goyave/v5/lang"
-	v "goyave.dev/goyave/v5/validation"
+	"goyave.dev/goyave/v6/lang"
+	v "goyave.dev/goyave/v6/validation"
 )
 
 // Config for the Auth0 [AppAuthenticator] and [Authenticator].
@@ -22,10 +19,6 @@ type Config struct {
 	// ClientSecret your Auth0 application client secret. Used to retrieve user info
 	// from the management API on user registration.
 	ClientSecret string
-
-	ValidatorOptions  []validator.Option               `json:"-" yaml:"-" toml:"-"`
-	JWKSOptions       []jwks.MultiIssuerProviderOption `json:"-" yaml:"-" toml:"-"`
-	ManagementOptions []option.RequestOption           `json:"-" yaml:"-" toml:"-"`
 
 	// IssuerDomains of the accepted issuers, used to generate the issuer URL. (e.g.: "dev-abcdefg.eu.auth0.com")
 	//
@@ -53,7 +46,6 @@ type Config struct {
 }
 
 // RuleSet returns the validation rules for this configuration section.
-// Currently not used. Implemented for Goyave v6 forward compatibility.
 func (Config) RuleSet() v.RuleSet {
 	return v.RuleSet{
 		{Path: v.CurrentElement, Rules: v.List{v.Required(), v.Object()}},
@@ -67,7 +59,6 @@ func (Config) RuleSet() v.RuleSet {
 }
 
 // Default returns the default configuration values.
-// Currently not used. Implemented for Goyave v6 forward compatibility.
 func (Config) Default() Config {
 	return Config{
 		IssuerDomains: []string{},
@@ -77,16 +68,6 @@ func (Config) Default() Config {
 		ClientID:      "",
 		ClientSecret:  "",
 	}
-}
-
-func init() {
-	// Goyave v5 config
-	config.Register("auth.auth0.issuerDomains", config.Entry{Value: []string{}, Type: reflect.String, IsSlice: true})
-	config.Register("auth.auth0.audiences", config.Entry{Value: []string{}, Type: reflect.String, IsSlice: true})
-	config.Register("auth.auth0.algorithm", config.Entry{Value: string(validator.RS256), Type: reflect.String})
-	config.Register("auth.auth0.cacheTTL", config.Entry{Value: 15 * 60, Type: reflect.Int})
-	config.Register("auth.auth0.clientId", config.Entry{Value: "", Type: reflect.String})
-	config.Register("auth.auth0.clientSecret", config.Entry{Value: "", Type: reflect.String})
 }
 
 // SignatureAlgorithmValidator converts the field under validation to the [validator.SignatureAlgorithm] string alias.
@@ -122,4 +103,34 @@ func SignatureAlgorithm() *SignatureAlgorithmValidator {
 func init() {
 	lang.SetDefaultValidationRule("auth0_signature_algorithm", "The :field must be a valid signature algorithm name.")
 	lang.SetDefaultValidationRule("auth0_signature_algorithm.element", "The :field elements must be valid signature algorithm names.")
+}
+
+type options struct {
+	validatorOptions  []validator.Option
+	jwksOptions       []jwks.MultiIssuerProviderOption
+	managementOptions []option.RequestOption
+}
+
+// Option define a non-serializable option for the authenticator.
+type Option func(o *options)
+
+// WithValidatorOptions set the JWT validation options.
+func WithValidatorOptions(opts ...validator.Option) Option {
+	return func(o *options) {
+		o.validatorOptions = opts
+	}
+}
+
+// WithJWKSOptions set the JWKS Multi-issuer provider options.
+func WithJWKSOptions(opts ...jwks.MultiIssuerProviderOption) Option {
+	return func(o *options) {
+		o.jwksOptions = opts
+	}
+}
+
+// WithManagementOptions set options for the User Management API requests.
+func WithManagementOptions(opts ...option.RequestOption) Option {
+	return func(o *options) {
+		o.managementOptions = opts
+	}
 }

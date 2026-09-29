@@ -3,10 +3,13 @@ package auth0
 import (
 	"fmt"
 	"testing"
+	"time"
 
+	"github.com/auth0/go-auth0/v3/management/option"
+	"github.com/auth0/go-jwt-middleware/v3/jwks"
 	"github.com/auth0/go-jwt-middleware/v3/validator"
 	"github.com/stretchr/testify/assert"
-	"goyave.dev/goyave/v5/validation"
+	"goyave.dev/goyave/v6/validation"
 )
 
 func TestConfig(t *testing.T) {
@@ -53,4 +56,18 @@ func TestSignatureAlgorithmValidator(t *testing.T) {
 			assert.Equal(t, c.want, v.Validate(ctx))
 		})
 	}
+}
+
+func TestOptions(t *testing.T) {
+	o := &options{}
+	jwksOpts := []jwks.MultiIssuerProviderOption{jwks.WithIssuerKeyConfig("fake_issuer", jwks.IssuerKeyConfig{Algorithm: validator.RS256, Secret: []byte("secret")})}
+	WithJWKSOptions(jwksOpts...)(o)
+	managementOpts := []option.RequestOption{option.WithBaseURL("/test")}
+	WithManagementOptions(managementOpts...)(o)
+	validatorOpts := []validator.Option{validator.WithAllowedClockSkew(time.Second)}
+	WithValidatorOptions(validatorOpts...)(o)
+
+	assert.Equal(t, jwksOpts, o.jwksOptions)
+	assert.Equal(t, managementOpts, o.managementOptions)
+	assert.Equal(t, validatorOpts, o.validatorOptions)
 }
