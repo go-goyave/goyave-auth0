@@ -127,8 +127,7 @@ func NewUser(db *gorm.DB) *User {
 func (r *User) GetByAuth0UserID(ctx context.Context, auth0UserID string) (*model.User, error) {
 	var user *model.User
 
-    err := session.DB(ctx, r.DB).Where("auth0_user_id", auth0UserID).First(&user)
-
+    err := session.DB(ctx, r.DB).Where("auth0_user_id", auth0UserID).First(&user).Error
 	if err != nil {
 		return nil, errwrap.New(err)
 	}
