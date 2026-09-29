@@ -81,7 +81,7 @@ When using the `auth0.AppAuthenticator`, your user service must implement the `a
 
 ```go
 func (s *Service) GetBySubject(ctx context.Context, subject string) (*dto.InternalUser, error) {
-	user, err := s.Repository.GetBySubject(ctx, subject)
+	user, err := s.Repository.GetByAuth0UserID(ctx, subject)
 	if err != nil {
 		return nil, errors.New(err)
 	}
@@ -100,6 +100,29 @@ func (s *Service) CreateFromAuth0(ctx context.Context, userProfile *management.G
 		return nil, errors.New(err)
 	}
 	return typeutil.MustConvert[*dto.InternalUser](user), nil
+}
+```
+
+#### Repository
+
+```go
+type User struct {
+	DB *gorm.DB
+}
+
+func NewUser(db *gorm.DB) *User {
+	return &User{DB: db}
+}
+
+func (r *User) GetByAuth0UserID(ctx context.Context, auth0UserID string) (*model.User, error) {
+	var user *model.User
+
+    err := session.DB(ctx, r.DB).Where("auth0_user_id", auth0UserID).First(&user)
+
+	if err != nil {
+		return nil, errors.New(err)
+	}
+	return user, nil
 }
 ```
 
