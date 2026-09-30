@@ -49,7 +49,8 @@ type Config struct {
 func (Config) RuleSet() v.RuleSet {
 	return v.RuleSet{
 		{Path: v.CurrentElement, Rules: v.List{v.Required(), v.Object()}},
-		{Path: "IssuerDomain", Rules: v.List{v.Required(), v.String(), v.Min(1)}},
+		{Path: "IssuerDomains", Rules: v.List{v.Required(), v.Array(), v.Min(1)}},
+		{Path: "IssuerDomains[]", Rules: v.List{v.String(), v.Min(1)}},
 		{Path: "Audiences", Rules: v.List{v.Required(), v.Array(), v.Min(1)}},
 		{Path: "Audiences[]", Rules: v.List{v.String(), v.Min(1)}},
 		{Path: "Algorithm", Rules: v.List{v.Required(), v.String(), SignatureAlgorithm()}},
