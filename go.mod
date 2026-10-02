@@ -9,7 +9,7 @@ require (
 	github.com/lestrrat-go/jwx/v3 v3.2.0
 	github.com/stretchr/testify v1.12.1
 	gorm.io/gorm v1.31.2
-	goyave.dev/goyave/v6 v6.0.0-20260929122840-8eb73f97f46c
+	goyave.dev/goyave/v6 v6.0.0-20261002075809-49ab422f3f17
 )
 
 require (
